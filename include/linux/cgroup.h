@@ -22,6 +22,8 @@
 #include <linux/seq_file.h>
 #include <linux/kernfs.h>
 #include <linux/wait.h>
+#include <linux/nsproxy.h>
+#include <linux/types.h>
 
 #ifdef CONFIG_CGROUPS
 
@@ -460,6 +462,13 @@ struct cftype {
 #endif
 };
 
+struct cgroup_namespace {
+	atomic_t		count;
+	unsigned int		proc_inum;
+	struct user_namespace	*user_ns;
+	struct cgroup		*root_cgrp;
+};
+
 extern struct cgroup_root cgrp_dfl_root;
 extern struct css_set init_css_set;
 
@@ -584,10 +593,28 @@ static inline int cgroup_name(struct cgroup *cgrp, char *buf, size_t buflen)
 	return kernfs_name(cgrp->kn, buf, buflen);
 }
 
+static inline char * __must_check cgroup_path_ns(struct cgroup_namespace *ns,
+						 struct cgroup *cgrp, char *buf,
+						 size_t buflen)
+{
+	if (ns) {
+		BUG_ON(!cgroup_on_dfl(cgrp));
+		return kernfs_path_from_node(ns->root_cgrp->kn, cgrp->kn, buf,
+					     buflen);
+	} else {
+		return kernfs_path(cgrp->kn, buf, buflen);
+	}
+}
+
 static inline char * __must_check cgroup_path(struct cgroup *cgrp, char *buf,
 					      size_t buflen)
 {
-	return kernfs_path(cgrp->kn, buf, buflen);
+	if (cgroup_on_dfl(cgrp)) {
+		return cgroup_path_ns(current->nsproxy->cgroup_ns, cgrp, buf,
+				      buflen);
+	} else {
+		return cgroup_path_ns(NULL, cgrp, buf, buflen);
+	}
 }
 
 static inline void pr_cont_cgroup_name(struct cgroup *cgrp)

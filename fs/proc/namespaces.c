@@ -32,6 +32,7 @@ static const struct proc_ns_operations *ns_entries[] = {
 	&userns_operations,
 #endif
 	&mntns_operations,
+	&cgroupns_operations,
 };
 
 static const struct file_operations ns_file_operations = {

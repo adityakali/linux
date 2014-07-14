@@ -57,6 +57,8 @@
 #include <linux/vmalloc.h> /* TODO: replace with more sophisticated array */
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/proc_ns.h>
+#include <linux/cgroup_namespace.h>
 
 #include <linux/atomic.h>
 
@@ -194,6 +196,15 @@ static void css_release(struct percpu_ref *ref);
 static void kill_css(struct cgroup_subsys_state *css);
 static int cgroup_addrm_files(struct cgroup *cgrp, struct cftype cfts[],
 			      bool is_add);
+
+struct cgroup_namespace init_cgroup_ns = {
+	.count = {
+		.counter = 1,
+	},
+	.proc_inum = PROC_CGROUP_INIT_INO,
+	.user_ns = &init_user_ns,
+	.root_cgrp = &cgrp_dfl_root.cgrp,
+};
 
 /* IDR wrappers which synchronize using cgroup_idr_lock */
 static int cgroup_idr_alloc(struct idr *idr, void *ptr, int start, int end,
@@ -4921,6 +4932,8 @@ int __init cgroup_init(void)
 	struct cgroup_subsys *ss;
 	unsigned long key;
 	int ssid, err;
+
+	get_user_ns(init_cgroup_ns.user_ns);
 
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_dfl_base_files));
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_legacy_base_files));
