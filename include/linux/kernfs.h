@@ -274,6 +274,8 @@ void kernfs_put(struct kernfs_node *kn);
 struct kernfs_node *kernfs_node_from_dentry(struct dentry *dentry);
 struct kernfs_root *kernfs_root_from_sb(struct super_block *sb);
 
+struct dentry *kernfs_obtain_root(struct super_block *sb,
+				  struct kernfs_node *kn);
 struct kernfs_root *kernfs_create_root(struct kernfs_syscall_ops *scops,
 				       unsigned int flags, void *priv);
 void kernfs_destroy_root(struct kernfs_root *root);

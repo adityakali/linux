@@ -1389,6 +1389,14 @@ static int parse_cgroupfs_options(char *data, struct cgroup_sb_opts *opts)
 			return -ENOENT;
 	}
 
+	/* If inside a non-init cgroup namespace, only allow default hierarchy
+	 * to be mounted.
+	 */
+	if ((current->nsproxy->cgroup_ns != &init_cgroup_ns) &&
+	    !(opts->flags & CGRP_ROOT_SANE_BEHAVIOR)) {
+		return -EINVAL;
+	}
+
 	if (opts->flags & CGRP_ROOT_SANE_BEHAVIOR) {
 		pr_warn("sane_behavior: this is still under development and its behaviors will change, proceed at your own risk\n");
 		if (nr_opts != 1) {
@@ -1581,6 +1589,15 @@ static void init_cgroup_root(struct cgroup_root *root,
 		set_bit(CGRP_CPUSET_CLONE_CHILDREN, &root->cgrp.flags);
 }
 
+struct dentry *cgroupns_get_root(struct super_block *sb,
+				 struct cgroup_namespace *ns)
+{
+	struct dentry *nsdentry;
+
+	nsdentry = kernfs_obtain_root(sb, ns->root_cgrp->kn);
+	return nsdentry;
+}
+
 static int cgroup_setup_root(struct cgroup_root *root, unsigned int ss_mask)
 {
 	LIST_HEAD(tmp_links);
@@ -1685,6 +1702,14 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 	int ret;
 	int i;
 	bool new_sb;
+	struct cgroup_namespace *ns =
+		get_cgroup_ns(current->nsproxy->cgroup_ns);
+
+	/* Check if the caller has permission to mount. */
+	if (!ns_capable(ns->user_ns, CAP_SYS_ADMIN)) {
+		put_cgroup_ns(ns);
+		return ERR_PTR(-EPERM);
+	}
 
 	/*
 	 * The first time anyone tries to mount a cgroup, enable the list
@@ -1817,11 +1842,28 @@ out_free:
 	kfree(opts.release_agent);
 	kfree(opts.name);
 
-	if (ret)
+	if (ret) {
+		put_cgroup_ns(ns);
 		return ERR_PTR(ret);
+	}
 
 	dentry = kernfs_mount(fs_type, flags, root->kf_root,
 				CGROUP_SUPER_MAGIC, &new_sb);
+
+	if (!IS_ERR(dentry) && (root == &cgrp_dfl_root)) {
+		/* If this mount is for the default hierarchy in non-init cgroup
+		 * namespace, then instead of root cgroup's dentry, we return
+		 * the dentry corresponding to the cgroupns->root_cgrp.
+		 */
+		if (ns != &init_cgroup_ns) {
+			struct dentry *nsdentry;
+
+			nsdentry = cgroupns_get_root(dentry->d_sb, ns);
+			dput(dentry);
+			dentry = nsdentry;
+		}
+	}
+
 	if (IS_ERR(dentry) || !new_sb)
 		cgroup_put(&root->cgrp);
 
@@ -1834,6 +1876,7 @@ out_free:
 		deactivate_super(pinned_sb);
 	}
 
+	put_cgroup_ns(ns);
 	return dentry;
 }
 
@@ -1862,6 +1905,7 @@ static struct file_system_type cgroup_fs_type = {
 	.name = "cgroup",
 	.mount = cgroup_mount,
 	.kill_sb = cgroup_kill_sb,
+	.fs_flags = FS_USERNS_MOUNT,
 };
 
 static struct kobject *cgroup_kobj;
